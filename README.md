@@ -61,6 +61,14 @@ Run the bench on your own machine before trusting any of it.
 
 ## Getting started
 
+Open a fresh Codex session and hand it [`setup-prompt.md`](setup-prompt.md).
+
+The agent checks what you already have, asks which preset you want, puts the
+command on your `PATH`, verifies the whole path end to end, and finishes by
+telling you which capabilities you just gave up.
+
+Or do it by hand. It is a symlink:
+
 ```bash
 git clone https://github.com/ImagineNotChetng/codexcut ~/projects/codexcut
 ln -s ~/projects/codexcut/bin/codexcut ~/.local/bin/codexcut
