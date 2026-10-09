@@ -4,12 +4,16 @@ A preset is a list of Codex CLI options. `codexcut --show` prints the exact
 command for the current preset. All of them are defined in
 [`lib/presets.sh`](../lib/presets.sh).
 
-| preset | adds back |
+| preset | keeps |
 |---|---|
-| `sh` | nothing: shell and `apply_patch` only |
-| `web` | live web search |
-| `skills` | the skills list |
+| `min` | shell and `apply_patch` only |
+| `sh` | `min` + web search + the MCP servers in your `config.toml` |
+| `skills` | `sh` + the skills list |
 | `default` | everything: stock Codex, no flags added |
+
+`sh` passes no web search or MCP flag at all, so both follow your own
+`config.toml`. MCP servers that come from a plugin are still off, because
+`--disable plugins` removes the plugin that starts them.
 
 ## What each switch does
 
@@ -41,7 +45,7 @@ machine with one MCP server and a long skills list.
 - `--disable unified_exec`, `code_mode_host`, `code_mode`,
   `context_management`, `hooks`.
 
-## What is left in `sh`
+## What is left in `min`
 
 About 3,250 tokens on the test machine, of which roughly 800 were its own
 `AGENTS.md`. The model still listed these tools: `exec_command`, `write_stdin`,

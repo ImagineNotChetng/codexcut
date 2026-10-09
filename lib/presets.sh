@@ -36,7 +36,7 @@ codexcut_bench_pin() {
 }
 
 codexcut_presets() {
-  printf '%s\n' sh web skills default
+  printf '%s\n' sh skills min default
 }
 
 # One `-c mcp_servers.<name>.enabled=false` per MCP server in config.toml.
@@ -76,14 +76,15 @@ codexcut_preset_flags() {
   local -a no_skills=(-c skills.include_instructions=false)
 
   case "$preset" in
-    # The shell and apply_patch, and nothing else.
-    sh)      printf '%s\n' "${common[@]}" "${no_web[@]}" "${no_skills[@]}"; codexcut_mcp_off ;;
-
-    # sh plus live web search.
-    web)     printf '%s\n' "${common[@]}" -c 'web_search="live"' "${no_skills[@]}"; codexcut_mcp_off ;;
+    # Shell, apply_patch, web search and your MCP servers. Web search and MCP
+    # are not touched, so they follow your own config.toml.
+    sh)      printf '%s\n' "${common[@]}" "${no_skills[@]}" ;;
 
     # sh plus your skills list.
-    skills)  printf '%s\n' "${common[@]}" "${no_web[@]}"; codexcut_mcp_off ;;
+    skills)  printf '%s\n' "${common[@]}" ;;
+
+    # The floor: shell and apply_patch only. No web search, no MCP servers.
+    min)     printf '%s\n' "${common[@]}" "${no_web[@]}" "${no_skills[@]}"; codexcut_mcp_off ;;
 
     # Stock Codex. The baseline you are measuring against.
     default) : ;;

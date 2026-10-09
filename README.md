@@ -2,8 +2,8 @@
 
 Run **Codex CLI** with almost everything cut away.
 
-Same CLI, same account, same login. But a session starts with the shell and
-`apply_patch` instead of two dozen tools, and a one-line base prompt instead of
+Same CLI, same account, same login. But a session starts with the shell,
+`apply_patch`, web search and your MCP servers instead of two dozen tools, and a one-line base prompt instead of
 the built-in one.
 
 This is a port of [claudecut](https://github.com/alexgetmancom/claudecut) by
@@ -11,7 +11,7 @@ Alex Getman, which does the same for Claude Code.
 
 ```
 codexcut  -->  Codex CLI     -->  OpenAI
-               (unmodified)       shell + apply_patch, one-line prompt
+               (unmodified)       shell, web, MCP, one-line prompt
 
 codex     -->  Codex CLI     -->  OpenAI
                (unmodified)       the full thing, untouched
@@ -31,16 +31,17 @@ codex     -->  Codex CLI     -->  OpenAI
 
 | preset | input tokens | what you keep |
 |---|---:|---|
-| `sh` | 3,251 | shell and `apply_patch` |
-| `skills` | 4,239 | `sh` + your skills list |
-| `web` | 5,707 | `sh` + live web search |
-| `default` | 16,442 | stock Codex |
+| `min` | 3,259 | shell and `apply_patch` |
+| `sh` | 6,495 | `min` + web search + your MCP servers |
+| `skills` | 7,534 | `sh` + your skills list |
+| `default` | 17,236 | stock Codex |
 
 **Real work**: the `inspect` task (describe this repository, read-only).
+The cut row is the `min` preset; `sh` was not run on this task.
 
 | preset | input tokens | of which cached | output | wall |
 |---|---:|---:|---:|---:|
-| `sh` | 23,550 | 10,624 | 245 | 17s |
+| `min` | 23,550 | 10,624 | 245 | 17s |
 | `default` | 76,274 | 68,352 | 355 | 20s |
 
 Both answers named the same entry point and the same two files.
@@ -50,8 +51,8 @@ Both answers named the same entry point and the same two files.
 - One run per cell. No repeats, no variance estimate.
 - One machine, Codex CLI 0.161.0, model `gpt-6.1-sol` at low effort.
 - The numbers include that machine's own setup: an 800-token global
-  `AGENTS.md` (kept in every preset), one MCP server and a long skills list
-  (both only in `default`). Your stock number will differ.
+  `AGENTS.md` (kept in every preset), one MCP server, live web search and a
+  long skills list. Your stock number will differ.
 - Cached input is billed at a lower rate, so the gap in cost is smaller than
   the gap in tokens.
 - Codex prints no dollar cost, so none is reported.
@@ -71,7 +72,7 @@ Then use it like Codex, because it is Codex:
 codexcut
 codexcut resume --last
 codexcut exec "explain src/index.ts"
-codexcut --preset web                 # more tools, just this once
+codexcut --preset min                 # shell only, just this once
 codexcut --full                       # stock Codex, just this once
 codexcut --show exec hi               # print the command, run nothing
 codexcut mcp list                     # passes through untouched
@@ -79,8 +80,8 @@ codexcut mcp list                     # passes through untouched
 
 ## What you give up
 
-In the `sh` preset: subagents, plugins and apps, your MCP servers, web search,
-the skills list, image viewing and generation, goals, the `request_user_input`
+In the `sh` preset: subagents, plugins and apps (with the MCP servers that
+plugins bring), the skills list, image viewing and generation, goals, the `request_user_input`
 tool and the built-in Codex instructions. Reading, searching and running all go
 through the shell.
 
@@ -133,7 +134,7 @@ instructions or the tool schemas.
 
 It is a script and not a profile file, because a profile has to live in
 `~/.codex`, and MCP servers can only be turned off one by one, by name. The
-launcher reads those names from your `config.toml` at start.
+`min` preset reads those names from your `config.toml` at start.
 
 ## Requirements
 
