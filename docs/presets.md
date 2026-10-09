@@ -1,153 +1,66 @@
-# Presets — what each cut costs, and what it breaks
+# Presets
 
-A preset is a set of stock Claude Code flags. Pick one with `--preset`, or set
-`CLAUDECUT_PRESET` in `~/.config/claudecut/config.sh`. The definitions live in
-[`lib/presets.sh`](../lib/presets.sh) — six lines each, edit them freely.
+A preset is a list of Codex CLI options. `codexcut --show` prints the exact
+command for the current preset. All of them are defined in
+[`lib/presets.sh`](../lib/presets.sh).
 
-## The numbers
+| preset | adds back |
+|---|---|
+| `sh` | nothing: shell and `apply_patch` only |
+| `web` | live web search |
+| `skills` | the skills list |
+| `default` | everything: stock Codex, no flags added |
 
-This table is **session overhead**: what a session costs before it has done any
-work. A real task adds file contents and command output, which cost the same
-under every preset, so measured end to end a cut session comes out about 2x
-cheaper per task — see [`docs/limits.md`](limits.md).
+## What each switch does
 
-Measured with `bench/run.sh --tasks hello`, which sends a prompt that needs no
-tools at all (`Reply with exactly: ok`). It isolates what a session costs before
-it has done anything: the system prompt plus every tool schema.
+Measured with `codex exec`, Codex CLI 0.161.0, model `gpt-6.1-sol`, one run
+each, on one machine. "Saves" is the drop in input tokens for a session that
+only answers "ok". Treat the numbers as rough sizes, not constants.
 
-| preset | prompt tokens | cost of one trivial turn | vs. stock |
-|---|---:|---:|---:|
-| `sh` | 953 | $0.0096 | 18x smaller |
-| `bash` | 2,079 | $0.0209 | 8.5x |
-| `sh-read` | 1,503 | $0.0151 | 12x |
-| `read-edit` | 2,087 | $0.0210 | 8x |
-| `restricted` | 11,612 | $0.0465 | 1.5x |
-| `default` | 17,625 | $0.0990 | — |
+| switch | removes | saves |
+|---|---|---:|
+| `-c model_instructions_file=lib/prompt.md` | the built-in base instructions | ~3,450 |
+| `-c agents.enabled=false` | subagent tools and the multi-agent role text | see below |
+| `--disable plugins`, `--disable apps` | plugin and app tools and their hints | see below |
+| `-c skills.include_instructions=false` | the skills list | see below |
+| `-c include_collaboration_mode_instructions=false` | the collaboration mode text | see below |
+| `-c mcp_servers.<name>.enabled=false` | your MCP servers, one flag per server | see below |
+| `-c web_search="disabled"` | the web search tool | ~2,450 |
+| `--disable view_image`, `--disable image_generation` | image tools | ~670 |
+| `--disable tool_suggest`, `skill_search`, `sleep_tool`, `goals` | those tools | ~700 |
+| `--disable default_mode_request_user_input` and `-c tools.experimental_request_user_input.enabled=false` | the question tool | ~190 |
 
-`bash` is now measured, and it is the more expensive of the two one-shell
-presets: Claude Code's own Bash schema costs about **1,200 tokens more per
-request** than mini-sh's three lines, and that difference is paid on every single
-request for the life of the session. On the `inspect` task, two runs per arm,
-`sh` averaged 7.2k prompt tokens against 10.9k for `bash` at equal answer
-quality — directionally 20–50% more, though the spread between identical runs is
-wide enough that only the fixed 1.2k above should be treated as solid.
+The five "see below" rows were measured together: about 5,000 tokens on a
+machine with one MCP server and a long skills list.
 
-Claude Code v2.1.278, Opus 5 at low effort, one run each. Reproduce with
-`bench/run.sh --tasks hello --repeat 5`, and expect your own numbers to differ:
-model, effort, plugins, MCP servers and `CLAUDE.md` all move them.
+## Switches that were tried and saved nothing
 
-A live interactive session is leaner than these headless figures — the `/context`
-readout for `sh` shows ~1.8k total, of which 36 tokens are the system prompt.
-Headless `-p` adds machinery of its own. Compare presets to presets, not to a
-screenshot.
+- `--disable multi_agent` and `--disable multi_agent_v2`: the multi-agent text
+  stayed. `agents.enabled=false` is what removes it.
+- `-c project_doc_max_bytes=0`: the global `AGENTS.md` still loaded.
+- `--disable unified_exec`, `code_mode_host`, `code_mode`,
+  `context_management`, `hooks`.
 
-## What each preset is
+## What is left in `sh`
 
-### `sh` — one tool
+About 3,250 tokens on the test machine, of which roughly 800 were its own
+`AGENTS.md`. The model still listed these tools: `exec_command`, `write_stdin`,
+`apply_patch`, `exec`, `wait` and `clock__curr_time`. No switch was found for
+the last four.
 
-```
---tools= --strict-mcp-config --mcp-config mini-sh/mcp.json
-```
+`--disable shell_tool` saves another ~640 tokens, and leaves the model with no
+way to run anything. No preset uses it.
 
-`--tools=` removes every built-in tool. The only thing left is `sh` from the
-MCP server in [`mini-sh/`](../mini-sh/server.mjs), whose schema is three lines.
-Reading, searching, editing and running tests all go through the shell:
-`cat`, `rg`, `sed`, `git`, your test runner.
+Two small context blocks are kept on purpose: the permissions text and the
+environment block (working directory, shell, date). Together they are about
+170 tokens. `include_permissions_instructions=false` and
+`include_environment_context=false` remove them.
 
-**Gone:** Read, Edit, Write, Bash, Grep, Glob, WebFetch, WebSearch, Task/Agent
-(no subagents), Skill (no skills, no `/skill-name`), TodoWrite, NotebookEdit.
+## Making your own
 
-**Costs you:** no parallel subagents, no skills or plugins, no web access, no
-native diff view on edits. The model writes files with heredocs, and you review
-them with `git diff` like any other change.
-
-**Suits:** work in one repo where you already know your way around, and where
-the shell is the interface you would have reached for anyway.
-
-### `bash` — the native shell instead of ours
-
-```
---tools=Bash
-```
-
-The same bet as `sh` — one tool, and it is a shell — but Claude Code's own Bash
-tool rather than [`mini-sh`](../mini-sh/server.mjs), so there is no MCP server
-to launch and no `--mcp-config`. What you give up is everything mini-sh does on
-top of a bare shell: the zsh prelude that stops an unquoted glob or a leading
-`=` from killing a command, the `timeout` shim macOS otherwise lacks, and
-output clipped head-and-tail instead of from one end. Those exist because a
-measured session lost 4% of its calls to their absence — see
-[`docs/knobs.md`](knobs.md#the-shell-the-one-tool-runs-in).
-
-Against that, the native tool is better integrated: the permission prompts are
-the ones you know, and its schema is Anthropic's rather than our three lines.
-That schema is also the whole cost difference — 2,079 prompt tokens against 953,
-measured on `hello`.
-
-**Suits:** wanting one shell and no MCP process at all, or checking how much of
-`sh`'s cost is the MCP boundary.
-
-### `sh-read` — one tool plus the reader
-
-```
---tools=Read
-```
-
-Adds back the native reader: line-numbered output, images and PDFs, and the
-harness tracking which files have been read. Costs about 600 tokens over `sh`.
-
-**Suits:** anything where you read far more than you run.
-
-### `read-edit` — native file tools
-
-```
---tools=Read,Edit,Write
-```
-
-Proper edits: exact-match replacement, a rendered diff, the permission prompt
-you expect on a write. The shell is still there for everything else.
-
-**Suits:** normal editing sessions where you want the diff UI back but still
-refuse to pay for search, web and subagent tooling.
-
-### `restricted` — everything except execution
-
-```
---restricted
-```
-
-A stock Claude Code flag, not ours: it keeps every built-in tool but removes the
-ones that run commands or code. Here that pairs oddly with an MCP shell — the
-shell comes back in through MCP — so treat this preset as the honest baseline it
-is: it shows that most of the context cost is not Bash. At 11.6k tokens it is
-still two thirds of stock.
-
-**Suits:** measuring. Rarely what you actually want to run.
-
-### `default` — stock Claude Code
-
-No flags. The baseline every other row is compared against. Reach it any time
-with `claudecut --full`.
-
-## Rolling your own
-
-Add a case to `claudecut_preset_flags` in [`lib/presets.sh`](../lib/presets.sh):
+Add a case to `codexcut_preset_flags` in `lib/presets.sh` and its name to
+`codexcut_presets`. Print one argument per line. Then price it:
 
 ```bash
-review) printf '%s\n' "${common[@]}" --tools=Read,Grep,Glob ;;
+bench/run.sh --tasks hello --presets sh,yours,default
 ```
-
-Tool names are the ones Claude Code uses internally — ask a stock session to
-list its tools and you get the current set for your version. Then measure it:
-
-```bash
-bench/run.sh --presets review,sh,default --tasks hello --repeat 3
-```
-
-Two things worth knowing before you cut further:
-
-- **`--tools=` is a whitelist, not a blacklist.** There is no way to subtract
-  one tool from the default set; you name what you keep.
-- **Some capabilities are tools.** Skills arrive through `Skill`, subagents
-  through `Agent`, todo lists through `TodoWrite`. Cutting the tool cuts the
-  feature, silently — nothing warns you that `/some-skill` no longer resolves.

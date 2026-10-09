@@ -1,92 +1,93 @@
-# claudecut presets — sourced by bin/claudecut and bench/run.sh.
+# codexcut presets - sourced by bin/codexcut and bench/run.sh.
 #
-# A preset is a set of flags handed to the Claude Code CLI at launch.
-# Nothing here is patched or wrapped: these are documented CLI flags.
+# A preset is a set of flags handed to the Codex CLI at launch. Nothing is
+# patched and nothing is written to ~/.codex: these are `-c key=value` config
+# overrides and `--disable <feature>` switches, both documented CLI options.
 #
-# claudecut_preset_flags <name>   prints the flags, one per line.
-# claudecut_presets               prints every preset name.
+# codexcut_preset_flags <name>   prints the flags, one argument per line.
+# codexcut_presets               prints every preset name.
 
-CLAUDECUT_ROOT="${CLAUDECUT_ROOT:-$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")/.." && pwd)}"
+CODEXCUT_ROOT="${CODEXCUT_ROOT:-$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")/.." && pwd)}"
 
-# The whole system prompt. Replaces Claude Code's default one.
-CLAUDECUT_SYSTEM_PROMPT="${CLAUDECUT_SYSTEM_PROMPT:-Coding agent in a git repo. Be concise. Never run destructive git or rm without asking.}"
+# The whole base prompt. Replaces the model's built-in Codex instructions.
+# Your AGENTS.md files are separate and still load.
+CODEXCUT_PROMPT_FILE="${CODEXCUT_PROMPT_FILE:-$CODEXCUT_ROOT/lib/prompt.md}"
 
-# Auto-compact window. Smaller window = earlier compaction = predictable spend,
-# larger = fewer compactions and less re-reading after each one. 300k is the
-# default because on a long session the compactions themselves are the expensive
-# part; drop it if you would rather cap what a single turn can cost.
-#
-# A value in `autoCompactWindow` in ~/.claude/settings.json wins over the
-# --autocompact flag passed here, so set it in one place or the other.
-CLAUDECUT_AUTOCOMPACT="${CLAUDECUT_AUTOCOMPACT:-300000}"
+# Optional. Token count that triggers auto-compaction. Empty keeps whatever
+# Codex or your config.toml already uses.
+CODEXCUT_AUTOCOMPACT="${CODEXCUT_AUTOCOMPACT:-}"
 
-# Effort level, when the model exposes one: low, medium, high, xhigh, max.
-CLAUDECUT_EFFORT="${CLAUDECUT_EFFORT:-low}"
+# Optional. Reasoning effort: low, medium, high... Empty keeps your own setting.
+CODEXCUT_EFFORT="${CODEXCUT_EFFORT:-}"
 
-# The one-tool MCP server.
-CLAUDECUT_MCP_CONFIG="${CLAUDECUT_MCP_CONFIG:-$CLAUDECUT_ROOT/mini-sh/mcp.json}"
+# Where Codex keeps config.toml. Only read, never written.
+CODEXCUT_CODEX_HOME="${CODEX_HOME:-$HOME/.codex}"
 
 # --- Benchmark-only knobs -----------------------------------------------------
-#
-# The launcher never uses these. They exist because a benchmark has to compare
-# like with like: without them the cut presets would run at CLAUDECUT_EFFORT
-# while the "default" arm silently picked up whatever model and effort level
-# your own settings files happen to set. Both arms get these, appended last so
-# they win over anything a preset set earlier.
-CLAUDECUT_BENCH_MODEL="${CLAUDECUT_BENCH_MODEL:-claude-opus-5}"
-CLAUDECUT_BENCH_EFFORT="${CLAUDECUT_BENCH_EFFORT:-low}"
+# Applied to every arm, the stock one included, so both run the same model at
+# the same effort. Empty means "whatever config.toml says".
+CODEXCUT_BENCH_MODEL="${CODEXCUT_BENCH_MODEL:-}"
+CODEXCUT_BENCH_EFFORT="${CODEXCUT_BENCH_EFFORT:-low}"
 
-# Settings sources the benchmark is allowed to read. Empty means "none", so a
-# stray autoCompactWindow or modelSettings in your own config cannot skew a run.
-CLAUDECUT_BENCH_SETTING_SOURCES="${CLAUDECUT_BENCH_SETTING_SOURCES-}"
-
-claudecut_bench_pin() {
-  [ -n "$CLAUDECUT_BENCH_MODEL" ]  && printf '%s\n' --model  "$CLAUDECUT_BENCH_MODEL"
-  [ -n "$CLAUDECUT_BENCH_EFFORT" ] && printf '%s\n' --effort "$CLAUDECUT_BENCH_EFFORT"
-  printf '%s\n' --setting-sources "$CLAUDECUT_BENCH_SETTING_SOURCES"
+codexcut_bench_pin() {
+  [ -n "$CODEXCUT_BENCH_MODEL" ]  && printf '%s\n' -m "$CODEXCUT_BENCH_MODEL"
+  [ -n "$CODEXCUT_BENCH_EFFORT" ] && printf '%s\n' -c "model_reasoning_effort=\"$CODEXCUT_BENCH_EFFORT\""
   return 0
 }
 
-claudecut_presets() {
-  printf '%s\n' sh bash sh-read read-edit restricted default
+codexcut_presets() {
+  printf '%s\n' sh web skills default
 }
 
-claudecut_preset_flags() {
+# One `-c mcp_servers.<name>.enabled=false` per MCP server in config.toml.
+# There is no flag that ignores them all, so the names are read from the file.
+codexcut_mcp_off() {
+  local cfg="$CODEXCUT_CODEX_HOME/config.toml" name
+  [ -f "$cfg" ] || return 0
+  while IFS= read -r name; do
+    [ -n "$name" ] && printf '%s\n' -c "mcp_servers.$name.enabled=false"
+  done < <(sed -n 's/^\[mcp_servers\.\([A-Za-z0-9_-]*\)\].*/\1/p' "$cfg" | sort -u)
+  return 0
+}
+
+codexcut_preset_flags() {
   local preset="$1"
 
   # Shared by every cut preset. "default" opts out below.
   local -a common=(
-    --system-prompt "$CLAUDECUT_SYSTEM_PROMPT"
-    --autocompact "$CLAUDECUT_AUTOCOMPACT"
-    --strict-mcp-config
-    --mcp-config "$CLAUDECUT_MCP_CONFIG"
+    -c "model_instructions_file=\"$CODEXCUT_PROMPT_FILE\""
+    -c agents.enabled=false
+    -c include_collaboration_mode_instructions=false
+    -c tools.experimental_request_user_input.enabled=false
+    --disable default_mode_request_user_input
+    --disable plugins
+    --disable apps
+    --disable view_image
+    --disable image_generation
+    --disable tool_suggest
+    --disable skill_search
+    --disable sleep_tool
+    --disable goals
   )
-  [ -n "$CLAUDECUT_EFFORT" ] && common+=(--effort "$CLAUDECUT_EFFORT")
+  [ -n "$CODEXCUT_AUTOCOMPACT" ] && common+=(-c "model_auto_compact_token_limit=$CODEXCUT_AUTOCOMPACT")
+  [ -n "$CODEXCUT_EFFORT" ]      && common+=(-c "model_reasoning_effort=\"$CODEXCUT_EFFORT\"")
+
+  local -a no_web=(-c 'web_search="disabled"')
+  local -a no_skills=(-c skills.include_instructions=false)
 
   case "$preset" in
-    # One tool total: the shell. Read, inspect and write all happen through it.
-    sh)         printf '%s\n' "${common[@]}" --tools= ;;
+    # The shell and apply_patch, and nothing else.
+    sh)      printf '%s\n' "${common[@]}" "${no_web[@]}" "${no_skills[@]}"; codexcut_mcp_off ;;
 
-    # The native Bash tool instead of the MCP shell: no MCP server to launch,
-    # but Claude Code's own Bash schema in place of mini-sh's three lines.
-    bash)       printf '%s\n' --system-prompt "$CLAUDECUT_SYSTEM_PROMPT" \
-                  --autocompact "$CLAUDECUT_AUTOCOMPACT" --strict-mcp-config \
-                  ${CLAUDECUT_EFFORT:+--effort} ${CLAUDECUT_EFFORT:+"$CLAUDECUT_EFFORT"} \
-                  --tools=Bash ;;
+    # sh plus live web search.
+    web)     printf '%s\n' "${common[@]}" -c 'web_search="live"' "${no_skills[@]}"; codexcut_mcp_off ;;
 
-    # Shell plus the native reader, for cheaper file reads with line numbers.
-    sh-read)    printf '%s\n' "${common[@]}" --tools=Read ;;
+    # sh plus your skills list.
+    skills)  printf '%s\n' "${common[@]}" "${no_web[@]}"; codexcut_mcp_off ;;
 
-    # Native file tools alongside the shell. Closest to normal editing.
-    read-edit)  printf '%s\n' "${common[@]}" --tools=Read,Edit,Write ;;
+    # Stock Codex. The baseline you are measuring against.
+    default) : ;;
 
-    # Every built-in tool EXCEPT the ones that execute commands or code.
-    # --restricted is a stock CLI flag; the shell tool still comes from MCP.
-    restricted) printf '%s\n' "${common[@]}" --restricted ;;
-
-    # Stock Claude Code. The baseline you are measuring against.
-    default)    : ;;
-
-    *) printf 'claudecut: unknown preset: %s\n' "$preset" >&2; return 1 ;;
+    *) printf 'codexcut: unknown preset: %s\n' "$preset" >&2; return 1 ;;
   esac
 }

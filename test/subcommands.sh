@@ -1,39 +1,57 @@
 #!/usr/bin/env bash
-# The subcommand list in bin/claudecut is hardcoded, because there is no way to
-# ask the CLI at launch without paying for a `--help` run on every invocation.
-# That means it can silently fall behind a Claude Code release: a new subcommand
-# would be treated as a prompt and launched with session flags attached.
+# The subcommand lists in bin/codexcut are hardcoded, because asking the CLI at
+# launch would cost a `--help` run on every invocation. So they can fall behind
+# a Codex release.
 #
-# This compares the hardcoded list against the live `claude --help` output.
-# Extras are fine — a name we pass through that does not exist yet costs
-# nothing. Anything missing is the real failure.
+# This compares them against the live `codex --help` output. Every subcommand
+# must be either passed through uncut or known to take the cut flags. A new
+# one that is in neither list fails the test, so someone decides which it is.
 set -euo pipefail
+export LC_ALL=C   # comm needs one sort order on both sides
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-command -v claude >/dev/null || { echo "test: claude not on PATH" >&2; exit 1; }
+command -v codex >/dev/null || { echo "test: codex not on PATH" >&2; exit 1; }
 
-# The case label spans several lines with backslash continuations.
-ours="$(sed -n '/^    agents|/,/subcommand=1/p' "$ROOT/bin/claudecut" \
-  | tr -d ' \\\n' | sed 's/)subcommand=1;;//' | tr '|' '\n' | sort -u)"
+# Session subcommands: these get the cut flags.
+cut="exec e review resume fork"
 
-live="$(claude --help 2>&1 \
-  | sed -n '/^Commands:/,$p' \
-  | sed -n 's/^  \([a-z][a-z0-9-]*\).*/\1/p' | sort -u)"
+# The pass-through case label spans several lines with backslash continuations.
+pass="$(sed -n '/^    agents|/,/passthrough=1/p' "$ROOT/bin/codexcut" \
+  | tr -d ' \\\n' | sed 's/)passthrough=1;;//' | tr '|' '\n')"
+
+ours="$(printf '%s\n' $cut $pass | sort -u)"
+
+# Names and aliases: "  exec   Run ... [aliases: e]".
+live="$(codex --help 2>&1 | sed -n '/^Commands:/,/^Arguments:/p' \
+  | awk '
+      /^  [a-z]/ { print $1 }
+      match($0, /\[aliases: [^]]*\]/) {
+        s = substr($0, RSTART + 10, RLENGTH - 11); gsub(/,/, " ", s)
+        n = split(s, a, " "); for (i = 1; i <= n; i++) print a[i]
+      }' | sort -u)"
 
 missing="$(comm -13 <(printf '%s\n' "$ours") <(printf '%s\n' "$live"))"
 extra="$(comm -23 <(printf '%s\n' "$ours") <(printf '%s\n' "$live"))"
 
-# Some subcommands are real but hidden from --help, so an "extra" is not
-# automatically dead weight: it may be one of those. `self-hosted-runner` is
-# the known case in 2.1.278.
 [ -n "$extra" ] && printf 'test: extras, hidden or gone: %s\n' "$(echo $extra)"
 
 if [ -n "$missing" ]; then
-  printf 'test: FAIL — subcommands this CLI has that claudecut would treat as a prompt:\n'
+  printf 'test: FAIL - subcommands this CLI has that codexcut does not know:\n'
   printf '  %s\n' $missing
-  printf 'Add them to the case block in bin/claudecut.\n'
+  printf 'Add them to bin/codexcut (pass-through) or to "cut" in this test.\n'
   exit 1
 fi
 
-printf 'test: ok — every subcommand of %s is passed through\n' "$(claude --version)"
+# Every cut flag must still be accepted. `debug prompt-input` loads the config
+# and renders the prompt locally, so this costs no model call.
+flags=()
+while IFS= read -r f; do [ -n "$f" ] && flags+=("$f"); done \
+  < <(. "$ROOT/lib/presets.sh"; codexcut_preset_flags sh)
+if ! codex debug prompt-input "${flags[@]}" hi >/dev/null 2>"${TMPDIR:-/tmp}/codexcut-test.err"; then
+  printf 'test: FAIL - codex rejected the sh preset flags:\n'
+  cat "${TMPDIR:-/tmp}/codexcut-test.err"
+  exit 1
+fi
+
+printf 'test: ok - %s knows every subcommand and accepts the sh preset\n' "$(codex --version)"

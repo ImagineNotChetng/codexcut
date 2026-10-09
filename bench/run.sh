@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# claudecut bench — run one task under several presets and compare the cost.
+# codexcut bench - run one task under several presets and compare the tokens.
 #
 #   bench/run.sh                                  every preset, every task
 #   bench/run.sh --presets sh,default             pick presets
@@ -7,20 +7,23 @@
 #   bench/run.sh --repeat 3                       repeat each cell
 #   bench/run.sh --dir ~/projects/some-repo       run against a real codebase
 #
-# Every run is a real `claude -p` call and spends real quota. Start with the
+# Every run is a real `codex exec` call and spends real quota. Start with the
 # `hello` task to see what a run costs before pointing this at anything larger.
 #
-# What it measures: wall time, turns, tokens in and out, cache reads, and the
-# cost the CLI itself reports. What it does NOT measure: whether the answer was
-# any good. Read bench/results/<stamp>/<task>.<preset>.<n>.txt and judge that
-# yourself — that is the part no script can do for you.
+# What it measures: wall time, turns, and the tokens Codex itself reports.
+# Codex prints no dollar cost, so there is none here. What it does NOT measure:
+# whether the answer was any good. Read
+# bench/results/<stamp>/<task>.<preset>.<n>.txt and judge that yourself.
+#
+# Runs are ephemeral (no session file is saved) and use your own sandbox and
+# approval settings.
 
 set -euo pipefail
 
-CLAUDECUT_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
-export CLAUDECUT_ROOT
+CODEXCUT_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+export CODEXCUT_ROOT
 # shellcheck source=../lib/presets.sh
-. "$CLAUDECUT_ROOT/lib/presets.sh"
+. "$CODEXCUT_ROOT/lib/presets.sh"
 
 presets=""
 tasks=""
@@ -38,19 +41,19 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-[ -n "$presets" ] || presets="$(claudecut_presets | paste -sd, -)"
+[ -n "$presets" ] || presets="$(codexcut_presets | paste -sd, -)"
 if [ -z "$tasks" ]; then
-  tasks="$(find "$CLAUDECUT_ROOT/bench/tasks" -name '*.md' -exec basename {} .md \; | sort | paste -sd, -)"
+  tasks="$(find "$CODEXCUT_ROOT/bench/tasks" -name '*.md' -exec basename {} .md \; | sort | paste -sd, -)"
 fi
 
 command -v jq >/dev/null || { echo "bench: jq is required" >&2; exit 127; }
 
 stamp="$(date +%Y%m%d-%H%M%S)"
-outdir="$CLAUDECUT_ROOT/bench/results/$stamp"
+outdir="$CODEXCUT_ROOT/bench/results/$stamp"
 mkdir -p "$outdir"
 
-claude_bin="${CLAUDECUT_CLAUDE_BIN:-$(command -v claude)}"
-[ -n "$claude_bin" ] || { echo "bench: claude not found in PATH" >&2; exit 127; }
+codex_bin="${CODEXCUT_CODEX_BIN:-$(command -v codex)}"
+[ -n "$codex_bin" ] || { echo "bench: codex not found in PATH" >&2; exit 127; }
 
 echo "bench: $stamp"
 echo "bench: workdir  $workdir"
@@ -63,7 +66,7 @@ IFS=',' read -r -a task_list <<< "$tasks"
 IFS=',' read -r -a preset_list <<< "$presets"
 
 for task in "${task_list[@]}"; do
-  task_file="$CLAUDECUT_ROOT/bench/tasks/$task.md"
+  task_file="$CODEXCUT_ROOT/bench/tasks/$task.md"
   [ -f "$task_file" ] || { echo "bench: no such task: $task" >&2; exit 2; }
   prompt="$(cat "$task_file")"
 
@@ -72,12 +75,11 @@ for task in "${task_list[@]}"; do
     flags=()
     while IFS= read -r flag; do
       [ -n "$flag" ] && flags+=("$flag")
-    done < <(claudecut_preset_flags "$preset")
-    # Pin model, effort and settings sources for every arm, including the
-    # "default" one, so the comparison does not depend on the runner's config.
+    done < <(codexcut_preset_flags "$preset")
+    # Pin model and effort for every arm, including the "default" one.
     while IFS= read -r flag; do
       flags+=("$flag")
-    done < <(claudecut_bench_pin)
+    done < <(codexcut_bench_pin)
 
     for n in $(seq 1 "$repeat"); do
       label="$task.$preset.$n"
@@ -85,13 +87,16 @@ for task in "${task_list[@]}"; do
 
       start=$(date +%s)
       set +e
-      ( cd "$workdir" && "$claude_bin" ${flags[@]+"${flags[@]}"} \
-          --output-format json -p "$prompt" ) > "$outdir/$label.json" 2> "$outdir/$label.err"
+      # stdin is closed on purpose: with a pipe there, `codex exec` waits for
+      # more prompt text and never starts.
+      ( cd "$workdir" && "$codex_bin" ${flags[@]+"${flags[@]}"} exec --json \
+          --ephemeral --skip-git-repo-check "$prompt" </dev/null ) \
+          > "$outdir/$label.jsonl" 2> "$outdir/$label.err"
       status=$?
       set -e
       end=$(date +%s)
 
-      if [ $status -ne 0 ] || ! jq -e . "$outdir/$label.json" >/dev/null 2>&1; then
+      if [ $status -ne 0 ] || ! grep -q '"turn.completed"' "$outdir/$label.jsonl"; then
         echo "FAILED (exit $status, see $label.err)"
         jq -n --arg task "$task" --arg preset "$preset" --argjson n "$n" \
               --argjson wall "$((end - start))" \
@@ -101,25 +106,27 @@ for task in "${task_list[@]}"; do
       fi
 
       # Keep the answer next to the numbers, so quality can be judged by hand.
-      jq -r '.result // ""' "$outdir/$label.json" > "$outdir/$label.txt"
+      jq -r 'select(.type=="item.completed" and .item.type=="agent_message") | .item.text' \
+        "$outdir/$label.jsonl" > "$outdir/$label.txt"
 
-      jq --arg task "$task" --arg preset "$preset" --argjson n "$n" \
-         --argjson wall "$((end - start))" \
-        '{task:$task, preset:$preset, run:$n, ok:(.is_error|not),
-          wall_s:$wall, duration_ms:.duration_ms, turns:.num_turns,
-          cost_usd:.total_cost_usd,
-          input:.usage.input_tokens, output:.usage.output_tokens,
-          cache_read:.usage.cache_read_input_tokens,
-          cache_write:.usage.cache_creation_input_tokens}' \
-        "$outdir/$label.json" >> "$outdir/rows.jsonl"
-
-      jq -r '"\(.total_cost_usd | . * 10000 | round / 10000) USD  \(.num_turns) turns  \(.duration_ms)ms"' \
-        "$outdir/$label.json"
+      # `input` is the prompt summed over every model request in the run, and
+      # it already includes the cached part. `turns` counts those requests'
+      # visible steps: tool calls plus messages.
+      jq -s -c --arg task "$task" --arg preset "$preset" --argjson n "$n" \
+         --argjson wall "$((end - start))" '
+        (map(select(.type=="turn.completed") | .usage)) as $u
+        | {task:$task, preset:$preset, run:$n, ok:true, wall_s:$wall,
+           turns:(map(select(.type=="item.completed")) | length),
+           input:($u | map(.input_tokens // 0) | add),
+           cached:($u | map(.cached_input_tokens // 0) | add),
+           output:($u | map(.output_tokens // 0) | add)}' \
+        "$outdir/$label.jsonl" | tee -a "$outdir/rows.jsonl" \
+        | jq -r '"\(.input) in  \(.cached) cached  \(.output) out  \(.turns) items  \(.wall_s)s"'
     done
   done
 done
 
 echo
-"$CLAUDECUT_ROOT/bench/summarize.sh" "$outdir" | tee "$outdir/summary.md"
+"$CODEXCUT_ROOT/bench/summarize.sh" "$outdir" | tee "$outdir/summary.md"
 echo
 echo "bench: raw results in $outdir"

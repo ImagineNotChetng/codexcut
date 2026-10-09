@@ -1,0 +1,94 @@
+#!/usr/bin/env bash
+# codexcut - run the stock Codex CLI with almost everything cut away.
+#
+# This is a launcher, not a fork. It adds documented CLI options to a normal
+# `codex` invocation. Your plain `codex` command stays untouched.
+#
+#   codexcut                      start a cut session
+#   codexcut exec "explain x.ts"  headless, still cut
+#   codexcut resume --last        resume, still cut
+#   codexcut mcp list             other subcommands pass through uncut
+#   codexcut --preset web         pick a different preset for this run
+#   codexcut --full               this once, run stock Codex
+#   codexcut --show               print the exact command, run nothing
+#
+# Codex takes its global options before the subcommand, so the cut also
+# applies to the subcommands that start or continue a session: exec, review,
+# resume and fork. Everything else is handed over exactly as typed.
+
+set -euo pipefail
+
+# Resolve symlinks before locating the checkout, because the documented install
+# is a symlink in ~/.local/bin. macOS `readlink` has no `-f`, so this loop is
+# the portable form.
+codexcut_self="${BASH_SOURCE[0]}"
+while [ -L "$codexcut_self" ]; do
+  codexcut_link="$(readlink -- "$codexcut_self")"
+  case "$codexcut_link" in
+    /*) codexcut_self="$codexcut_link" ;;
+    *)  codexcut_self="$(cd -- "$(dirname -- "$codexcut_self")" && pwd)/$codexcut_link" ;;
+  esac
+done
+CODEXCUT_ROOT="$(cd -- "$(dirname -- "$codexcut_self")/.." && pwd)"
+export CODEXCUT_ROOT
+
+# Optional user overrides: CODEXCUT_* variables, sourced before the presets.
+CODEXCUT_CONFIG="${CODEXCUT_CONFIG:-$HOME/.config/codexcut/config.sh}"
+# shellcheck disable=SC1090
+[ -f "$CODEXCUT_CONFIG" ] && . "$CODEXCUT_CONFIG"
+
+# shellcheck source=../lib/presets.sh
+. "$CODEXCUT_ROOT/lib/presets.sh"
+
+# Resolve the real binary.
+codex_bin="${CODEXCUT_CODEX_BIN:-$(type -P codex 2>/dev/null || true)}"
+if [ -z "$codex_bin" ]; then
+  echo "codexcut: cannot find the codex CLI in PATH" >&2
+  echo "codexcut: set CODEXCUT_CODEX_BIN to its absolute path" >&2
+  exit 127
+fi
+
+preset="${CODEXCUT_PRESET:-sh}"
+full=0
+show=0
+
+# Only our own flags are consumed here; everything else goes to Codex.
+args=()
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --preset)   preset="${2:?--preset needs a name}"; shift 2 ;;
+    --preset=*) preset="${1#*=}"; shift ;;
+    --full)     full=1; shift ;;
+    --show)     show=1; shift ;;
+    --presets)  codexcut_presets; exit 0 ;;
+    --)         shift; args+=("$@"); break ;;
+    *)          args+=("$1"); shift ;;
+  esac
+done
+
+# Subcommands that do not run a model session get no cut flags.
+passthrough=0
+if [ ${#args[@]} -gt 0 ]; then
+  case "${args[0]}" in
+    agents|login|logout|mcp|plugin|app-server|remote-control|completion|update|\
+    doctor|sandbox|debug|apply|a|queue|archive|delete|migrate-rollouts|\
+    unarchive|cloud|exec-server|features|help)
+      passthrough=1 ;;
+  esac
+fi
+
+cmd=("$codex_bin")
+if [ "$full" -eq 0 ] && [ "$passthrough" -eq 0 ]; then
+  while IFS= read -r flag; do
+    [ -n "$flag" ] && cmd+=("$flag")
+  done < <(codexcut_preset_flags "$preset")
+fi
+[ ${#args[@]} -gt 0 ] && cmd+=("${args[@]}")
+
+if [ "$show" -eq 1 ]; then
+  printf '%q ' "${cmd[@]}"
+  printf '\n'
+  exit 0
+fi
+
+exec "${cmd[@]}"
