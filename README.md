@@ -62,7 +62,7 @@ Run the bench on your own machine before trusting any of it.
 ## Getting started
 
 ```bash
-git clone https://github.com/OWNER/codexcut ~/projects/codexcut
+git clone https://github.com/ImagineNotChetng/codexcut ~/projects/codexcut
 ln -s ~/projects/codexcut/bin/codexcut ~/.local/bin/codexcut
 ```
 
