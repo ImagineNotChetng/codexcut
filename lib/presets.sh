@@ -76,14 +76,14 @@ codexcut_preset_flags() {
   local -a no_skills=(-c skills.include_instructions=false)
 
   case "$preset" in
-    # Shell, apply_patch, web search and your MCP servers. Web search and MCP
-    # are not touched, so they follow your own config.toml.
-    sh)      printf '%s\n' "${common[@]}" "${no_skills[@]}" ;;
+    # Shell, apply_patch and web search. Web search is not touched, so it
+    # follows your own config.toml. MCP servers are off.
+    sh)      printf '%s\n' "${common[@]}" "${no_skills[@]}"; codexcut_mcp_off ;;
 
     # sh plus your skills list.
-    skills)  printf '%s\n' "${common[@]}" ;;
+    skills)  printf '%s\n' "${common[@]}"; codexcut_mcp_off ;;
 
-    # The floor: shell and apply_patch only. No web search, no MCP servers.
+    # The floor: shell and apply_patch only. No web search.
     min)     printf '%s\n' "${common[@]}" "${no_web[@]}" "${no_skills[@]}"; codexcut_mcp_off ;;
 
     # Stock Codex. The baseline you are measuring against.

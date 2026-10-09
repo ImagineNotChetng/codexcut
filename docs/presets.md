@@ -7,13 +7,12 @@ command for the current preset. All of them are defined in
 | preset | keeps |
 |---|---|
 | `min` | shell and `apply_patch` only |
-| `sh` | `min` + web search + the MCP servers in your `config.toml` |
+| `sh` | `min` + web search |
 | `skills` | `sh` + the skills list |
 | `default` | everything: stock Codex, no flags added |
 
-`sh` passes no web search or MCP flag at all, so both follow your own
-`config.toml`. MCP servers that come from a plugin are still off, because
-`--disable plugins` removes the plugin that starts them.
+`sh` passes no web search flag, so web search follows your own `config.toml`.
+MCP servers are off in every cut preset.
 
 ## What each switch does
 

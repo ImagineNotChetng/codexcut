@@ -3,7 +3,7 @@
 Run **Codex CLI** with almost everything cut away.
 
 Same CLI, same account, same login. But a session starts with the shell,
-`apply_patch`, web search and your MCP servers instead of two dozen tools, and a one-line base prompt instead of
+`apply_patch` and web search instead of two dozen tools, and a one-line base prompt instead of
 the built-in one.
 
 This is a port of [claudecut](https://github.com/alexgetmancom/claudecut) by
@@ -11,7 +11,7 @@ Alex Getman, which does the same for Claude Code.
 
 ```
 codexcut  -->  Codex CLI     -->  OpenAI
-               (unmodified)       shell, web, MCP, one-line prompt
+               (unmodified)       shell + web search, one-line prompt
 
 codex     -->  Codex CLI     -->  OpenAI
                (unmodified)       the full thing, untouched
@@ -32,8 +32,8 @@ codex     -->  Codex CLI     -->  OpenAI
 | preset | input tokens | what you keep |
 |---|---:|---|
 | `min` | 3,259 | shell and `apply_patch` |
-| `sh` | 6,495 | `min` + web search + your MCP servers |
-| `skills` | 7,534 | `sh` + your skills list |
+| `sh` | 5,715 | `min` + web search |
+| `skills` | 6,754 | `sh` + your skills list |
 | `default` | 17,236 | stock Codex |
 
 **Real work**: the `inspect` task (describe this repository, read-only).
@@ -80,8 +80,8 @@ codexcut mcp list                     # passes through untouched
 
 ## What you give up
 
-In the `sh` preset: subagents, plugins and apps (with the MCP servers that
-plugins bring), the skills list, image viewing and generation, goals, the `request_user_input`
+In the `sh` preset: subagents, plugins and apps, your MCP servers, the skills
+list, image viewing and generation, goals, the `request_user_input`
 tool and the built-in Codex instructions. Reading, searching and running all go
 through the shell.
 
@@ -134,7 +134,7 @@ instructions or the tool schemas.
 
 It is a script and not a profile file, because a profile has to live in
 `~/.codex`, and MCP servers can only be turned off one by one, by name. The
-`min` preset reads those names from your `config.toml` at start.
+launcher reads those names from your `config.toml` at start.
 
 ## Requirements
 
